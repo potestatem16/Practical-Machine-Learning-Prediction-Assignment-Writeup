@@ -1,0 +1,321 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Manuel Diaz"
+output: html_document
+---
+
+## Overview
+
+This document aims to show the manner in which 6 participants performed some exercise. 
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+
+The data for this project come from this [source](http://groupware.les.inf.puc-rio.br/har).
+
+The training and test data for this project are available here:
+
+*[Training Data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+
+*[Test Data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+
+## Goal of the Project.
+
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. It may use any of the other variables to predict with. Must create a report describing how was builded the model, how was used cross validation, what was thought the expected out of sample error is, and why was made the choices made. It will also use the prediction model to predict 20 different test cases.
+
+### Packages
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table)
+library(caret)
+library(dplyr)
+library(ggthemes)
+library(corrplot)
+library(RColorBrewer)
+library(rpart)
+library(rattle)
+library(gbm)
+library(MASS)
+```
+
+## Download and Store data.
+
+Download and check the files will be in the specify work directory.
+
+```{r}
+setwd("C:/Users/aleja/Documents/Cursos/Coursera R pratices/Prediction Assignment Writeup")
+```
+
+
+```{r}
+train_url<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_url<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+```
+
+```{r, eval=FALSE}
+ifelse(!dir.exists(file.path(getwd(), "Data")), 
+       dir.create(file.path(getwd(), "Data")), FALSE)
+```
+
+Download the databases and save them in the correct file.
+
+```{r, eval=FALSE}
+download.file(url = train_url, destfile = file.path("./Data", "self_movement_train_data.csv"), 
+              method = "curl")
+
+download.file(url = test_url, destfile = file.path("./Data", "self_movement_test_data.csv"), 
+              method = "curl")
+
+
+```
+
+Verify that the databases were downloaded correctly.
+
+```{r}
+list.files("./Data")
+```
+
+
+## Data Processing
+
+It will always be necessary to organize and arrange the database with which to work.
+
+```{r}
+fread("./Data/self_movement_train_data.csv")->train_df
+fread("./Data/self_movement_test_data.csv")->test_df
+```
+
+The train and test files have a lot of columns that contains only NA's, thus, these columns will be dispensed.
+
+```{r}
+str(train_df)
+
+```
+
+```{r}
+cat("Amount of NA's in train set", sum(is.na(train_df)==TRUE), sep = "\n")
+```
+```{r}
+cat("Amount of NA's in test set",sum(is.na(test_df)==TRUE), sep = "\n")
+```
+
+*For removing the columns with NA's, it is use "dplyr". Also, it will be remove the first 5 columns, since they do not contain relevant information.
+
+```{r}
+train_df[,-c(1:5)] %>%
+     select_if(~ !any(is.na(.)))->train_data
+
+test_df[,-c(1:5)] %>%
+     select_if(~ !any(is.na(.)))->test_data
+```
+
+```{r}
+cat("Amount of NA's in new train set", sum(is.na(train_data)==TRUE), sep = "\n")
+```
+```{r}
+cat("Amount of NA's in new test set",sum(is.na(test_data)==TRUE), sep = "\n")
+```
+
+Now, the dimensions of the remain datasets are:
+
+```{r}
+cat("Dims. of training set", dim(train_data))
+
+cat("Dims. of test set", dim(test_data))
+```
+
+There is only 55 coumns remaining, which contains the majority of relevant information for the analysis.
+
+
+## Exploratory analysis
+In the plot below, it is easy to see which are the most common classes.
+
+```{r}
+g1 <- ggplot(data = train_data, aes(x=as.factor(train_data$classe)))
+g1 + geom_bar(fill="firebrick3", colour="black")+theme_stata()+
+     ylab("Frequency") + xlab("Classes") + ggtitle("Frequency of different classes")
+
+```
+
+In the correlation plot below, it can be seen the variables that have more correlation between them, neither is positive or negative relation.
+The corplot is ordered for the first principal components. 
+
+```{r}
+corM <- cor(train_data[, -c(1,55)])
+corrplot(corM, order = "FPC", method = "circle", type = "upper", 
+         tl.cex = 0.7, tl.col="black", col=brewer.pal(n=8, name="RdBu"))
+```
+
+
+## Prediction Models.
+
+In this project, predictive analysis will be performed with three models widely used today: 
+
+*Random Forests.
+
+*Decision Tree.
+
+*Generalized Boosted Model.
+
+To perform the models, we need to divide our training data into train and test set. For this task, was used the "caret" package. For more information about this package, visit the [link](https://topepo.github.io/caret/).
+
+```{r}
+partition  <- createDataPartition(train_data$classe, p=0.75, list=FALSE)
+
+train_set <- train_data[partition, ]
+
+test_set <- train_data[-partition, ]
+```
+
+### Random Forest.
+
+```{r}
+control_rf <- trainControl(method="cv", number=4, verboseIter=FALSE)
+fit_rf <- train(classe ~ ., data=train_set, method="rf",
+                          trControl=control_rf)
+```
+
+This is the result of the final model from the Random Forest model.
+
+```{r}
+fit_rf$finalModel
+```
+
+Below, the prediction adjust to the test set and the confusion matrix from the Random Forest Model.
+
+```{r}
+predict_rf<- predict(fit_rf, newdata=test_set)
+matrix_rf <- confusionMatrix(predict_rf, as.factor(test_set$classe))
+matrix_rf
+```
+
+
+
+```{r}
+plot(fit_rf, main="Random Forest Plot.")
+```
+
+
+### Gradient Boosted Model (GBM)
+
+```{r}
+controlGBM <- trainControl(method = "cv", number = 5)
+fit_gbm  <- train(classe ~ ., data=train_set, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+```
+
+This is the result of the final model from the GBM model.
+
+```{r}
+fit_gbm$finalModel
+```
+Below, the prediction adjust to the test set and the confusion matrix from the GBM Model.
+
+```{r}
+predict_gbm<- predict(fit_gbm, newdata=test_set)
+matrix_gbm <- confusionMatrix(predict_gbm, as.factor(test_set$classe))
+matrix_gbm
+```
+
+
+### Decision Trees.
+
+This is the model of the final model from the GBM model, and the control parameters.
+
+```{r }
+fit_tree <- rpart(classe ~ ., data=train_set, method="class")
+fit_tree$control
+
+```
+
+Below, the prediction adjust to the test set and the confusion matrix from the Decision Tree Model.
+
+```{r}
+predict_tree<- predict(fit_tree, newdata=test_set, type="class")
+matrix_tree <- confusionMatrix(predict_tree, as.factor(test_set$classe))
+matrix_tree
+```
+
+```{r}
+fancyRpartPlot(fit_tree, main="Decision Tree Plot.")
+```
+
+
+### Linear Discrimination Analysis (LDA)
+
+```{r}
+control <- trainControl(method = "cv", number = 5)
+
+fit_lda <- train(classe~., data=train_set, 
+                 method="lda", metric="Accuracy", trControl=control)
+```
+
+This is the result of the final model from the GBM model.
+
+```{r}
+fit_lda$finalModel
+```
+
+Below, the prediction adjust to the test set and the confusion matrix from the LDA Model.
+
+```{r}
+predict_lda <- predict(fit_lda, newdata=test_set)
+matrix_lda<- confusionMatrix(predict_lda, as.factor(test_set$classe))
+matrix_lda
+```
+
+
+### K- Nearest Neighbors (KNN)
+
+```{r}
+fit_knn <- train(classe~., data=train_set, method="knn", metric="Accuracy", 
+                 trControl=control)
+```
+
+Below, the prediction adjust to the test set and the confusion matrix from the KNN Model.
+
+```{r}
+predict_knn <- predict(fit_knn, newdata=test_set)
+matrix_knn <- confusionMatrix(predict_knn, as.factor(test_set$classe))
+matrix_knn
+```
+
+```{r}
+plot(fit_knn, main="KNN model Plot.")
+```
+
+
+## Performance of the models.
+
+The model with the best performance, by accuracy metric is the Gradient Boosted Model.
+
+```{r}
+
+perform_acuracy <- c(round(matrix_lda$overall[[1]], 4),
+             round(matrix_knn$overall[[1]], 4),
+             round(matrix_gbm$overall[[1]], 4),
+             round(matrix_rf$overall[[1]], 4),
+             round(matrix_tree$overall[[1]], 4))
+model_names<-c('Linear Discrimination Analysis (LDA)', 
+                         'K- Nearest Neighbors (KNN)',
+                         'Gradient Boosting (GBM)',
+                         'Random Forest (RF)',
+                         'Decision Tree')
+
+(accuracies<-as.data.frame(cbind(model_names, perform_acuracy)))
+```
+
+
+## Applying the selected Model to the Test Data.
+
+It easy to see in the table below, the labels for the test data.
+
+```{r}
+predict_test_data <- predict(fit_gbm, newdata=test_data)
+table(predict_test_data,test_data$problem_id)
+```
+
+
